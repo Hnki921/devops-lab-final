@@ -1,0 +1,27 @@
+# Frontend Dockerfile for Todo List Application
+# Serves static assets (CSS, JS) from the views and assets folder
+
+FROM node:18-slim
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install --production
+
+# Copy application files
+COPY . .
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+USER nodejs
+
+# Expose port
+EXPOSE 8000
+
+# Start application (serving frontend through Express)
+CMD ["node", "index.js"]
