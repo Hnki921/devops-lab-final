@@ -22,25 +22,40 @@ services:
 
   # Backend Service (Node.js/Express)
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
+    image: ${IMAGE_BACKEND}
     container_name: todo-backend
     ports:
       - "8000:8000"
     environment:
       - NODE_ENV=production
-      - ENVIRONMENT=development
-      - DEPLOYMENT=local
+      - ENVIRONMENT=production
+      - DEPLOYMENT=staging
       - DB_DEVELOPMENT=mongodb://database:27017/todo_list
       - DB_NAME_DEVELOPMENT=todo_list
       - PORT=8000
     depends_on:
       database:
         condition: service_healthy
-    volumes:
-      - .:/app
-      - /app/node_modules
+    networks:
+      - todo-network
+    restart: unless-stopped
+
+  # Frontend Service (served through Express)
+  frontend:
+    image: ${IMAGE_FRONTEND}
+    container_name: todo-frontend
+    ports:
+      - "8001:8000"
+    environment:
+      - NODE_ENV=production
+      - ENVIRONMENT=production
+      - DEPLOYMENT=staging
+      - DB_DEVELOPMENT=mongodb://database:27017/todo_list
+      - DB_NAME_DEVELOPMENT=todo_list
+      - PORT=8000
+    depends_on:
+      database:
+        condition: service_healthy
     networks:
       - todo-network
     restart: unless-stopped

@@ -1,8 +1,7 @@
 # Backend Dockerfile for Todo List Application
-# Multi-stage build for optimized image
+# Full-stack Node.js app running as backend service
 
-# Stage 1: Build stage
-FROM node:18-slim AS builder
+FROM node:18-slim
 
 WORKDIR /app
 
@@ -12,22 +11,8 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install --production
 
-# Stage 2: Runtime stage
-FROM node:18-slim
-
-WORKDIR /app
-
-# Copy node_modules from builder
-COPY --from=builder /app/node_modules ./node_modules
-
 # Copy application files
 COPY . .
-
-# Create non-root user for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-USER nodejs
 
 # Expose port
 EXPOSE 8000

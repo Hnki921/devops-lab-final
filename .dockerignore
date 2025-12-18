@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.github
+.env
+.env.local
+README.md
+CI-CD-DOCUMENTATION.md
+PIPELINE-RUN-SCREENSHOT.md
+Jenkinsfile
+docker-compose.yml
+docker-compose.deploy.yml
+.vscode
+.DS_Store
+package-lock.json
