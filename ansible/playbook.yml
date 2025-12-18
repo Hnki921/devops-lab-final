@@ -1,0 +1,509 @@
+---
+# Ansible Playbook for Todo List Application Setup
+# Automates installation and configuration of webservers and database servers
+
+- name: Todo List Application - Complete Setup
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    # ============================================
+    # COMMON SETUP FOR ALL HOSTS
+    # ============================================
+    
+    - name: Update system packages
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: common
+
+    - name: Install basic packages
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - vim
+          - htop
+          - net-tools
+          - build-essential
+          - python3-pip
+          - python3-dev
+          - apt-transport-https
+          - ca-certificates
+          - gnupg
+          - lsb-release
+        state: present
+      tags: common
+
+    - name: Create application user
+      user:
+        name: "{{ app_user }}"
+        home: "{{ app_home }}"
+        shell: /bin/bash
+        state: present
+      tags: common
+
+    - name: Configure sudo access for application user
+      lineinfile:
+        path: /etc/sudoers
+        line: "{{ app_user }} ALL=(ALL) NOPASSWD:ALL"
+        state: present
+        validate: "visudo -cf %s"
+      tags: common
+
+    # ============================================
+    # DOCKER INSTALLATION (ALL HOSTS)
+    # ============================================
+    
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+      tags: docker
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+      tags: docker
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+      tags: docker
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+      tags: docker
+
+    - name: Add user to docker group
+      user:
+        name: "{{ app_user }}"
+        groups: docker
+        append: yes
+      tags: docker
+
+    - name: Install Docker Compose
+      shell: |
+        curl -L "https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        chmod +x /usr/local/bin/docker-compose
+      args:
+        creates: /usr/local/bin/docker-compose
+      tags: docker
+
+    - name: Verify Docker installation
+      shell: docker --version
+      register: docker_version
+      tags: docker
+
+    - name: Display Docker version
+      debug:
+        msg: "Docker installed: {{ docker_version.stdout }}"
+      tags: docker
+
+    # ============================================
+    # NODE.JS INSTALLATION (WEBSERVERS ONLY)
+    # ============================================
+
+    - name: Add Node.js repository
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_{{ node_version }} | sudo -E bash -
+      when: inventory_hostname in groups['webservers']
+      tags: nodejs
+
+    - name: Install Node.js and npm
+      apt:
+        name:
+          - nodejs
+          - npm
+        state: present
+      when: inventory_hostname in groups['webservers']
+      tags: nodejs
+
+    - name: Install npm dependencies globally
+      npm:
+        name: "{{ item }}"
+        global: yes
+        state: present
+      loop:
+        - pm2
+        - nodemon
+      when: inventory_hostname in groups['webservers']
+      tags: nodejs
+
+    - name: Verify Node.js installation
+      shell: node --version && npm --version
+      register: node_version
+      when: inventory_hostname in groups['webservers']
+      tags: nodejs
+
+    - name: Display Node.js version
+      debug:
+        msg: "Node.js installed: {{ node_version.stdout }}"
+      when: inventory_hostname in groups['webservers']
+      tags: nodejs
+
+    # ============================================
+    # NGINX INSTALLATION (WEBSERVERS ONLY)
+    # ============================================
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+      when: inventory_hostname in groups['webservers']
+      tags: nginx
+
+    - name: Start Nginx service
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+      when: inventory_hostname in groups['webservers']
+      tags: nginx
+
+    - name: Create Nginx configuration for reverse proxy
+      copy:
+        dest: /etc/nginx/sites-available/todo-app
+        content: |
+          server {
+              listen 80;
+              server_name _;
+
+              location / {
+                  proxy_pass http://localhost:{{ app_port }};
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_cache_bypass $http_upgrade;
+              }
+
+              location ~ ^/api/ {
+                  proxy_pass http://localhost:{{ app_port }};
+                  proxy_http_version 1.1;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              }
+          }
+      when: inventory_hostname in groups['webservers']
+      tags: nginx
+
+    - name: Enable Nginx site configuration
+      file:
+        src: /etc/nginx/sites-available/todo-app
+        dest: /etc/nginx/sites-enabled/todo-app
+        state: link
+      when: inventory_hostname in groups['webservers']
+      tags: nginx
+
+    - name: Disable default Nginx configuration
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      when: inventory_hostname in groups['webservers']
+      tags: nginx
+
+    - name: Test Nginx configuration
+      shell: nginx -t
+      register: nginx_test
+      when: inventory_hostname in groups['webservers']
+      tags: nginx
+
+    - name: Reload Nginx service
+      service:
+        name: nginx
+        state: reloaded
+      when: inventory_hostname in groups['webservers']
+      tags: nginx
+
+    # ============================================
+    # MONGODB INSTALLATION (DBSERVERS ONLY)
+    # ============================================
+
+    - name: Add MongoDB GPG key
+      apt_key:
+        url: https://www.mongodb.org/static/pgp/server-6.0.asc
+        state: present
+      when: inventory_hostname in groups['dbservers']
+      tags: mongodb
+
+    - name: Add MongoDB repository
+      apt_repository:
+        repo: "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu {{ ansible_distribution_release }}/mongodb-org/6.0 multiverse"
+        state: present
+      when: inventory_hostname in groups['dbservers']
+      tags: mongodb
+
+    - name: Install MongoDB
+      apt:
+        name:
+          - mongodb-org
+          - mongodb-org-server
+          - mongodb-org-shell
+          - mongodb-org-tools
+        state: present
+      when: inventory_hostname in groups['dbservers']
+      tags: mongodb
+
+    - name: Create MongoDB data directory
+      file:
+        path: /var/lib/mongodb
+        owner: mongodb
+        group: mongodb
+        mode: '0755'
+        state: directory
+      when: inventory_hostname in groups['dbservers']
+      tags: mongodb
+
+    - name: Configure MongoDB bind IP
+      lineinfile:
+        path: /etc/mongod.conf
+        regexp: "^  bindIp:"
+        line: "  bindIp: 0.0.0.0"
+        state: present
+      when: inventory_hostname in groups['dbservers']
+      notify: Restart MongoDB
+      tags: mongodb
+
+    - name: Start MongoDB service
+      service:
+        name: mongod
+        state: started
+        enabled: yes
+      when: inventory_hostname in groups['dbservers']
+      tags: mongodb
+
+    - name: Wait for MongoDB to start
+      pause:
+        seconds: 5
+      when: inventory_hostname in groups['dbservers']
+      tags: mongodb
+
+    - name: Create MongoDB database and user
+      shell: |
+        mongosh << EOF
+        use admin
+        db.createUser({
+          user: "{{ db_user }}",
+          pwd: "{{ db_password }}",
+          roles: [{role: "root", db: "admin"}]
+        })
+        use {{ db_name }}
+        db.createCollection("tasks")
+        EOF
+      when: inventory_hostname in groups['dbservers']
+      tags: mongodb
+
+    - name: Verify MongoDB installation
+      shell: mongosh --version
+      register: mongodb_version
+      when: inventory_hostname in groups['dbservers']
+      tags: mongodb
+
+    - name: Display MongoDB version
+      debug:
+        msg: "MongoDB installed: {{ mongodb_version.stdout }}"
+      when: inventory_hostname in groups['dbservers']
+      tags: mongodb
+
+    # ============================================
+    # PYTHON AND DEPENDENCIES (ALL HOSTS)
+    # ============================================
+
+    - name: Install Python3 packages
+      pip:
+        name:
+          - pip
+          - setuptools
+          - wheel
+        state: latest
+      tags: python
+
+    - name: Install system monitoring tools
+      apt:
+        name:
+          - sysstat
+          - iotop
+          - nethogs
+        state: present
+      tags: monitoring
+
+    # ============================================
+    # APPLICATION SETUP (WEBSERVERS)
+    # ============================================
+
+    - name: Create application directory
+      file:
+        path: "{{ app_home }}/todo-app"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+        state: directory
+      when: inventory_hostname in groups['webservers']
+      tags: app-setup
+
+    - name: Clone application repository
+      git:
+        repo: https://github.com/Hnki921/devops-lab-final.git
+        dest: "{{ app_home }}/todo-app"
+        version: main
+      become_user: "{{ app_user }}"
+      when: inventory_hostname in groups['webservers']
+      tags: app-setup
+
+    - name: Install Node.js dependencies
+      shell: npm install
+      args:
+        chdir: "{{ app_home }}/todo-app"
+      become_user: "{{ app_user }}"
+      when: inventory_hostname in groups['webservers']
+      tags: app-setup
+
+    - name: Create .env file for application
+      copy:
+        dest: "{{ app_home }}/todo-app/.env"
+        content: |
+          ENVIRONMENT=production
+          DEPLOYMENT=docker
+          DB_DEVELOPMENT=mongodb://{{ db_user }}:{{ db_password }}@{{ groups['dbservers'][0] }}:{{ db_port }}/{{ db_name }}
+          DB_PRODUCTION=mongodb://{{ db_user }}:{{ db_password }}@{{ groups['dbservers'][0] }}:{{ db_port }}/{{ db_name }}
+          PORT={{ app_port }}
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0600'
+      when: inventory_hostname in groups['webservers']
+      tags: app-setup
+
+    - name: Create PM2 ecosystem config
+      copy:
+        dest: "{{ app_home }}/todo-app/ecosystem.config.js"
+        content: |
+          module.exports = {
+            apps: [{
+              name: 'todo-app',
+              script: './index.js',
+              instances: 1,
+              exec_mode: 'cluster',
+              env: {
+                NODE_ENV: 'production',
+                PORT: {{ app_port }}
+              },
+              error_file: './logs/pm2-error.log',
+              out_file: './logs/pm2-out.log'
+            }]
+          };
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+      when: inventory_hostname in groups['webservers']
+      tags: app-setup
+
+    - name: Create logs directory
+      file:
+        path: "{{ app_home }}/todo-app/logs"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+        state: directory
+      when: inventory_hostname in groups['webservers']
+      tags: app-setup
+
+    # ============================================
+    # FIREWALL CONFIGURATION
+    # ============================================
+
+    - name: Enable UFW firewall
+      ufw:
+        state: enabled
+        policy: default
+      tags: firewall
+
+    - name: Allow SSH
+      ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+      tags: firewall
+
+    - name: Allow HTTP on webservers
+      ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+      when: inventory_hostname in groups['webservers']
+      tags: firewall
+
+    - name: Allow HTTPS on webservers
+      ufw:
+        rule: allow
+        port: '443'
+        proto: tcp
+      when: inventory_hostname in groups['webservers']
+      tags: firewall
+
+    - name: Allow MongoDB on dbservers
+      ufw:
+        rule: allow
+        port: '{{ db_port }}'
+        proto: tcp
+        from_ip: "{{ item }}"
+      loop: "{{ groups['webservers'] }}"
+      when: inventory_hostname in groups['dbservers']
+      tags: firewall
+
+  handlers:
+    - name: Restart MongoDB
+      service:
+        name: mongod
+        state: restarted
+      listen: Restart MongoDB
+
+  post_tasks:
+    - name: Display deployment summary
+      debug:
+        msg: |
+          ============================================
+          TODO LIST APPLICATION - DEPLOYMENT COMPLETE
+          ============================================
+          
+          Webservers: {{ groups['webservers'] | join(', ') }}
+          Database Servers: {{ groups['dbservers'] | join(', ') }}
+          
+          Services installed:
+          - Docker & Docker Compose
+          - Node.js {{ node_version }}
+          - Nginx (Reverse Proxy on port 80)
+          - MongoDB 6.0 (on dbservers)
+          - Python 3
+          
+          Application Details:
+          - User: {{ app_user }}
+          - Home: {{ app_home }}
+          - Port: {{ app_port }}
+          - Database: {{ db_name }}
+          
+          ============================================
+      tags: always
+
+    - name: Save deployment log
+      copy:
+        dest: /tmp/deployment-summary.txt
+        content: |
+          Deployment completed at: {{ ansible_date_time.iso8601 }}
+          Webservers: {{ groups['webservers'] | join(', ') }}
+          Database Servers: {{ groups['dbservers'] | join(', ') }}
+          Hostname: {{ ansible_hostname }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+      tags: always
