@@ -8,9 +8,9 @@ npm-debug.log
 README.md
 CI-CD-DOCUMENTATION.md
 PIPELINE-RUN-SCREENSHOT.md
+PIPELINE_FIX_SUMMARY.md
 Jenkinsfile
 docker-compose.yml
 docker-compose.deploy.yml
 .vscode
 .DS_Store
-package-lock.json
