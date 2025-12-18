@@ -7,6 +7,11 @@ metadata:
     app: todo-frontend
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: todo-frontend
@@ -15,12 +20,25 @@ spec:
       labels:
         app: todo-frontend
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - todo-frontend
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: frontend
         image: cheemea/todo-frontend:latest
         imagePullPolicy: Always
         ports:
-        - containerPort: 8000
+        - name: http
+          containerPort: 8000
         env:
         - name: NODE_ENV
           value: production
@@ -30,6 +48,13 @@ spec:
           value: todo_list
         - name: PORT
           value: "8000"
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
         livenessProbe:
           httpGet:
             path: /
@@ -37,6 +62,7 @@ spec:
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
+          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /
@@ -44,17 +70,21 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 5
           timeoutSeconds: 3
+          failureThreshold: 2
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: todo-frontend-service
   namespace: todo-app
+  labels:
+    app: todo-frontend
 spec:
+  type: LoadBalancer
   selector:
     app: todo-frontend
   ports:
   - protocol: TCP
-    port: 8001
+    port: 80
     targetPort: 8000
-  type: LoadBalancer
+    name: http

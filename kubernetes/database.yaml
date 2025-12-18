@@ -3,8 +3,12 @@ kind: Deployment
 metadata:
   name: todo-database
   namespace: todo-app
+  labels:
+    app: todo-database
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: todo-database
@@ -21,23 +25,62 @@ spec:
         env:
         - name: MONGO_INITDB_DATABASE
           value: todo_list
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
         volumeMounts:
         - name: mongodb-storage
           mountPath: /data/db
+        livenessProbe:
+          exec:
+            command:
+              - mongosh
+              - --eval
+              - db.adminCommand('ping')
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+              - mongosh
+              - --eval
+              - db.adminCommand('ping')
+          initialDelaySeconds: 5
+          periodSeconds: 5
       volumes:
       - name: mongodb-storage
-        emptyDir: {}
+        persistentVolumeClaim:
+          claimName: mongodb-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc
+  namespace: todo-app
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: managed-csi
+  resources:
+    requests:
+      storage: 10Gi
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: todo-database-service
   namespace: todo-app
+  labels:
+    app: todo-database
 spec:
+  clusterIP: None
   selector:
     app: todo-database
   ports:
   - protocol: TCP
     port: 27017
     targetPort: 27017
-  type: ClusterIP

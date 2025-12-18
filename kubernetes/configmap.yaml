@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: todo-config
+  namespace: todo-app
+data:
+  app-name: "Todo List Application"
+  environment: "production"
+  log-level: "info"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: todo-secrets
+  namespace: todo-app
+type: Opaque
+stringData:
+  mongodb-database: "todo_list"
+  api-key: "your-api-key-here"
